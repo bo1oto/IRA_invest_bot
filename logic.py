@@ -23,9 +23,9 @@ class HandlerGroup(Enum):
 
 bot_version = 'v0.2'
 
-orig_bot_token: str = '2117017621:AAEvDWDuwMXFoQleaLp8OqZkc5tk_QUf2IE'
+orig_bot_token: str = 'token'
 
-admin_id: int = 1090869834
+admin_id: int = 0000000000
 bot: Bot = Bot(token=test_bot_token)
 updater: Updater = Updater(bot=bot)
 dispatcher: Dispatcher = updater.dispatcher
