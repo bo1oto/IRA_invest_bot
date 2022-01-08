@@ -205,8 +205,8 @@ class Company:
             report += '\n'
 
         # DCF
-        if config['report']['dcf']:
-            add_line = f'{str(self.ticker["dcf"])} $' if self.ticker["dcf"] is not None else lang_dict['dcf']['no_data']
+        if config['report']['dcf'][0]:
+            add_line = f'{str(round(self.ticker["dcf"], 2))} $' if self.ticker["dcf"] is not None else lang_dict['dcf']['no_data']
             report += build(lang_dict['dcf']['base_line'], [add_line], ['_'])
 
         return report

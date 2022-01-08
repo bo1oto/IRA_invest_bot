@@ -23,10 +23,10 @@ class HandlerGroup(Enum):
 
 bot_version = 'v0.2'
 
-orig_bot_token: str = 'token'
+orig_bot_token: str = '2117017621:AAEvDWDuwMXFoQleaLp8OqZkc5tk_QUf2IE'
 
 admin_id: int = 1090869834
-bot: Bot = Bot(token=orig_bot_token)
+bot: Bot = Bot(token=test_bot_token)
 updater: Updater = Updater(bot=bot)
 dispatcher: Dispatcher = updater.dispatcher
 lang_dict: dict = {}
@@ -40,10 +40,8 @@ key_words: list = [
 
 # Service functions
 def upload_dict() -> None:
-    file_dict = open("\\Config/language.json", "rt", encoding="utf-8")
     global lang_dict
-    lang_dict = json.load(file_dict)
-    file_dict.close()
+    lang_dict = json.load(open("\\Config/language.json", "rt", encoding="utf-8"))
 
 def no_context_message(update: Update, context: CallbackContext) -> None:
     update.message.reply_copy(update.effective_chat.id, update.message.message_id)
@@ -74,7 +72,9 @@ config_template = {
                         True,
                         False
                     ],
-                    'dcf': False,
+                    'dcf': [
+                        False
+                    ],
                     'dynamics': 0
                 },
                 'chart': {
@@ -87,13 +87,11 @@ config_template = {
             }
         }
 
-def update_config(user_id: int, lang: str = '', work_mode: int = -1, chart=(-1, True), report=("heh", -1, True),
+def update_config(user_id: int, lang: str = '', work_mode: int = -1, chart=(-1, True), report=('heh', -1, True),
                   dynamics: int = False) -> None:
     file_path = f'\\Config/users/{str(user_id)}.json'
     if exists(file_path):
-        file_config = open(file_path, "rt")
-        config = json.load(file_config)
-        file_config.close()
+        config = json.load(open(file_path, "rt"))
         if lang:
             config["language"] = lang
         if work_mode != -1:
@@ -108,16 +106,12 @@ def update_config(user_id: int, lang: str = '', work_mode: int = -1, chart=(-1, 
         # Задаём дефолтные настройки, уже три :)
         config = config_template
 
-    file_config = open(file_path, "wt")
-    json.dump(config, file_config)
-    file_config.close()
+    json.dump(config, open(file_path, "wt"))
 
 def get_lang_code(user_id: int) -> str:
     file_path = f'\\Config/users/{str(user_id)}.json'
     if exists(file_path):
-        file_config = open(file_path, "rt")
-        config = json.load(file_config)
-        file_config.close()
+        config = json.load(open(file_path, "rt"))
         return config["language"]
     else:
         # Если по какой-то причине конфиг пропал, создаём новый
@@ -127,9 +121,7 @@ def get_lang_code(user_id: int) -> str:
 def get_work_mode(user_id: int) -> int:
     file_path = f'\\Config/users/{str(user_id)}.json'
     if exists(file_path):
-        file_config = open(file_path, "rt")
-        config = json.load(file_config)
-        file_config.close()
+        config = json.load( open(file_path, "rt"))
         return config["work_mode"]
     else:
         # Если по какой-то причине конфиг пропал, создаём новый
@@ -139,9 +131,7 @@ def get_work_mode(user_id: int) -> int:
 def get_config(user_id: int) -> dict:
     file_path = f'\\Config/users/{str(user_id)}.json'
     if exists(file_path):
-        file_config = open(file_path, "rt")
-        config = json.load(file_config)
-        file_config.close()
+        config = json.load(open(file_path, "rt"))
         return config["config"]
     else:
         # Если по какой-то причине конфиг пропал, создаём новый
@@ -221,31 +211,32 @@ def lang_selected(update: Update, context: CallbackContext) -> None:
 # report
 def generate_report_config_keyboard(update: Update, type_num: int) -> tuple[str, InlineKeyboardMarkup]:
     report_types = [
-        "finance",
-        "balance",
-        "div",
-        "rate"
+        'finance',
+        'balance',
+        'div',
+        'rate',
+        'dcf'
     ]
     if type_num == len(report_types):  # Обновляем, если в конце списка типов
         type_num = 0
     lang_code = get_lang_code(update.effective_user.id)
-    report_dict = lang_dict[lang_code]["settings"]["report"]
-    config = get_config(update.effective_user.id)["report"]
+    report_dict = lang_dict[lang_code]['settings']['report']
+    config = get_config(update.effective_user.id)['report']
 
-    keyboard = [[InlineKeyboardButton(report_dict[report_types[type_num]]["name"],
+    keyboard = [[InlineKeyboardButton(report_dict[report_types[type_num]]['name'],
                                       callback_data='c_r' + 't' + str(type_num))]
                 ]
     for conf, text, i in zip(config[report_types[type_num]],
-                             report_dict[report_types[type_num]]["data"],
+                             report_dict[report_types[type_num]]['data'],
                              range(len(config))):
         smile = u"\U00002705" if conf else u"\U0000274C"
         keyboard.append([InlineKeyboardButton(f'{text} {smile}', callback_data='c_r' + str(i + 1) + str(type_num))])
     keyboard.append([InlineKeyboardButton(
-        report_dict["dynamics"]["base_line"] +
-        report_dict["dynamics"]["data"][config["dynamics"]],
+        report_dict['dynamics']['base_line'] +
+        report_dict['dynamics']['data'][config['dynamics']],
         callback_data='c_rd' + str(type_num))])
-    keyboard.append([InlineKeyboardButton(lang_dict[lang_code]["settings"]["close"], callback_data='c_e')])
-    return report_dict["name"], InlineKeyboardMarkup(keyboard)
+    keyboard.append([InlineKeyboardButton(lang_dict[lang_code]['settings']['close'], callback_data='c_e')])
+    return report_dict['name'], InlineKeyboardMarkup(keyboard)
 
 def select_report_config(update: Update, context: CallbackContext) -> None:
     title, keyboard = generate_report_config_keyboard(update, 0)
@@ -276,10 +267,11 @@ def report_config_selected(update: Update, context: CallbackContext) -> None:
     query.edit_message_text(query.message.text, reply_markup=keyboard)
 
     report_tags = [
-        "finance",
-        "balance",
-        "div",
-        "rate"
+        'finance',
+        'balance',
+        'div',
+        'rate',
+        'dcf'
     ]
     type_num = int(keyboard.inline_keyboard[option_num][0].callback_data.__str__()[4])
     update_config(update.effective_user.id, report=(report_tags[type_num], option_num - 1, state))
@@ -423,7 +415,7 @@ def start_telegram_bot() -> None:
     bind_handlers()
     updater.start_webhook(listen='0.0.0.0',
                           port=443,
-                          url_path='2009741400:AAHYdzqM_3cX72EEWbAKsWDGg0AFruhS1z0',
+                          url_path=orig_bot_token,
                           key='\\tg-key.key',
                           cert='\\tg-cert.pem',
-                          webhook_url='13.51.244.137:443/2009741400:AAHYdzqM_3cX72EEWbAKsWDGg0AFruhS1z0')
+                          webhook_url=f'13.51.244.137:{orig_bot_token}')
