@@ -23,8 +23,7 @@ class HandlerGroup(Enum):
 
 bot_version = 'v0.2'
 
-orig_bot_token: str = '2117017621:AAEvDWDuwMXFoQleaLp8OqZkc5tk_QUf2IE'
-test_bot_token: str = '2009741400:AAHYdzqM_3cX72EEWbAKsWDGg0AFruhS1z0'
+orig_bot_token: str = 'token'
 
 admin_id: int = 1090869834
 bot: Bot = Bot(token=orig_bot_token)
