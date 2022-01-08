@@ -1,2 +1,2 @@
 # IRA_invest_bot
-v0.1
+v0.2
