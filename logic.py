@@ -26,7 +26,7 @@ bot_version = 'v0.2'
 orig_bot_token: str = 'token'
 
 admin_id: int = 0000000000
-bot: Bot = Bot(token=test_bot_token)
+bot: Bot = Bot(token=orig_bot_token)
 updater: Updater = Updater(bot=bot)
 dispatcher: Dispatcher = updater.dispatcher
 lang_dict: dict = {}
