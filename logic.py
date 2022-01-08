@@ -21,7 +21,7 @@ class HandlerGroup(Enum):
     ADMIN = 3
 
 
-bot_version = 'v0.1'
+bot_version = 'v0.2'
 
 orig_bot_token: str = '2117017621:AAEvDWDuwMXFoQleaLp8OqZkc5tk_QUf2IE'
 test_bot_token: str = '2009741400:AAHYdzqM_3cX72EEWbAKsWDGg0AFruhS1z0'
@@ -51,26 +51,7 @@ def no_context_message(update: Update, context: CallbackContext) -> None:
 
 
 # Config functions
-def update_config(user_id: int, lang: str = '', work_mode: int = -1, chart=(-1, True), report=("heh", -1, True),
-                  dynamics: int = False) -> None:
-    file_path = f'\\Config/users/{str(user_id)}.json'
-    if exists(file_path):
-        file_config = open(file_path, "rt")
-        config = json.load(file_config)
-        file_config.close()
-        if lang:
-            config["language"] = lang
-        if work_mode != -1:
-            config["work_mode"] = work_mode
-        if chart[0] != -1:
-            config['config']['chart'][chart[0]] = chart[1]
-        if not report[0].__eq__("heh"):
-            config['config']['report'][report[0]][report[1]] = report[2]
-        if dynamics:
-            config['config']['report']['dynamics'] = 1 if config['config']['report']['dynamics'] == 0 else 0
-    else:
-        # Задаём дефолтные настройки, уже три :)
-        config = {
+config_template = {
             'language': 'en',
             'work_mode': 0,
             'config': {
@@ -97,11 +78,36 @@ def update_config(user_id: int, lang: str = '', work_mode: int = -1, chart=(-1, 
                     'dcf': False,
                     'dynamics': 0
                 },
-                'chart': [
-                    True  # Base price chart
-                ]
+                'chart': {
+                    "0": True,
+                    "data": [
+                        True
+                    ],
+                    "timeseries": 365
+                }
             }
         }
+
+def update_config(user_id: int, lang: str = '', work_mode: int = -1, chart=(-1, True), report=("heh", -1, True),
+                  dynamics: int = False) -> None:
+    file_path = f'\\Config/users/{str(user_id)}.json'
+    if exists(file_path):
+        file_config = open(file_path, "rt")
+        config = json.load(file_config)
+        file_config.close()
+        if lang:
+            config["language"] = lang
+        if work_mode != -1:
+            config["work_mode"] = work_mode
+        if chart[0] != -1:
+            config['config']['chart'][chart[0]] = chart[1]
+        if not report[0].__eq__("heh"):
+            config['config']['report'][report[0]][report[1]] = report[2]
+        if dynamics:
+            config['config']['report']['dynamics'] = 1 if config['config']['report']['dynamics'] == 0 else 0
+    else:
+        # Задаём дефолтные настройки, уже три :)
+        config = config_template
 
     file_config = open(file_path, "wt")
     json.dump(config, file_config)
@@ -141,38 +147,7 @@ def get_config(user_id: int) -> dict:
     else:
         # Если по какой-то причине конфиг пропал, создаём новый
         # + надо наверное уведомить и попросить заново настроить бота
-        return {
-            'language': 'en',
-            'work_mode': 0,
-            'config': {
-                'report': {
-                    'finance': [
-                        True,  # Revenue
-                        True,  # Net income
-                        True  # FCF
-                    ],
-                    'balance': [
-                        True,  # Total Debt
-                        False,  # Cash and equivalents
-                        True  # Net Debt
-                    ],
-                    'rate': [
-                        True,  # base_rate
-                        False,  # relative_rate industry
-                        True  # relative_rate sector
-                    ],
-                    'div': [
-                        True,
-                        False
-                    ],
-                    'dcf': False,
-                    'dynamics': 0
-                },
-                'chart': [
-                    True  # Base price chart
-                ]
-            }
-        }
+        return config_template["config"]
 
 
 # Main functions
@@ -449,7 +424,7 @@ def start_telegram_bot() -> None:
     bind_handlers()
     updater.start_webhook(listen='0.0.0.0',
                           port=443,
-                          url_path=orig_bot_token,
+                          url_path='2009741400:AAHYdzqM_3cX72EEWbAKsWDGg0AFruhS1z0',
                           key='\\tg-key.key',
                           cert='\\tg-cert.pem',
-                          webhook_url='13.51.244.137:443/' + orig_bot_token)
+                          webhook_url='13.51.244.137:443/2009741400:AAHYdzqM_3cX72EEWbAKsWDGg0AFruhS1z0')

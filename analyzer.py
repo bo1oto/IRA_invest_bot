@@ -92,7 +92,7 @@ class Company:
                                 [str(self.ticker["base_rate"]), max_rate],
                                 ['_', '__']
                                 )
-            if config_r[1]:
+            if config_r[1]: # base
                 base_str = lang_dict["rate"]["data"][1]
                 ind = self.ticker["relative_rate"]["base"]["industry"]
                 sec = self.ticker["relative_rate"]["base"]["sector"]
@@ -113,8 +113,8 @@ class Company:
                     if sec is not None else \
                     build(base_str, [lang_dict["rate"]["no_data"][1]], ['__'])
                 report += base_str
-            if config_r[2]:
-                base_str = lang_dict["rate"]["data"][1]
+            if config_r[2]: # wide
+                base_str = lang_dict["rate"]["data"][2]
                 ind = self.ticker["relative_rate"]["wide"]["industry"]
                 sec = self.ticker["relative_rate"]["wide"]["sector"]
 
@@ -205,8 +205,9 @@ class Company:
             report += '\n'
 
         # DCF
-        if config["report"]["dcf"]:
-            report += build(lang_dict["dcf"], [str(to_lnum(self.ticker["dcf"]))], ['_'])
+        if config['report']['dcf']:
+            add_line = f'{str(self.ticker["dcf"])} $' if self.ticker["dcf"] is not None else lang_dict['dcf']['no_data']
+            report += build(lang_dict['dcf']['base_line'], [add_line], ['_'])
 
         return report
 
@@ -264,16 +265,6 @@ class Company:
         fig.clf()
         return plot_path
 
-    def upload_data(self) -> None:
-        sector = self.all_tickers[self.ticker_str]["sector"]
-        self.industry_str = self.all_tickers[self.ticker_str]["industry"]
-        self.prepare_data(sector)
-        self.ticker = self.old_ticker
-        self.industry = self.old_industry
-        if (None in self.ticker['relative_rate']['base']) | (None in self.ticker['relative_rate']['wide']):
-            self.ticker['relative_rate'] = self.get_relative_rate(self.ticker["base_rate"], self.ticker["indicators"])
-            json.dump(self.ticker, open(self.ticker_path, "wt"))
-
     def prepare_data(self, sector: str):
         if not path.exists(f'{Company.data_path}{sector}'):
             mkdir(f'{Company.data_path}{sector}')
@@ -285,14 +276,11 @@ class Company:
         self.ticker_path = f'{Company.data_path}{sector}/{self.industry_str}/{self.ticker_str}.json'
 
         if not self.is_new_ticker:
-            with open(self.ticker_path, 'rt') as old_ticker_file:
-                self.old_ticker = json.load(old_ticker_file)
+            self.old_ticker = json.load(open(self.ticker_path, 'rt', encoding='utf-8'))
         if path.exists(self.sector_path):
-            with open(self.sector_path, 'rt') as sector_file:
-                self.sector = json.load(sector_file)
+            self.sector = json.load(open(self.sector_path, 'rt', encoding='utf-8'))
         if path.exists(self.industry_path):
-            with open(self.industry_path, 'rt') as industry_file:
-                self.old_industry = json.load(industry_file)
+            self.old_industry = json.load(open(self.industry_path, 'rt', encoding='utf-8'))
 
     # Есть некоторая погрешность из-за none значений, потом поправлю путём пересчёта по тикерам
     def upgrade_average_industry(self) -> None:
@@ -472,8 +460,13 @@ class Company:
             7. Price = (EV + Cash - Debt) / outstanding share
         """
         # надо учесть, что может не быть ожиданий
-        risk_free, market_rate_all, estimates, income, cashflow, balance = network.get_dcf_data(self.ticker_str)
-        if len(income) < 3:
+        risk_free, market_rate_all, estimates, income, cashflow, balance, ev = network.get_dcf_data(self.ticker_str)
+        if ev:
+            ev = ev[0]
+        else:
+            return None
+        profile = network.get_profile(self.ticker_str)
+        if len(income) < 5:
             return None
 
         income.reverse()
@@ -483,12 +476,13 @@ class Company:
 
         # Base
         ebit: list = [data["operatingIncome"] for data in income]
-        tax_rate = abs(income[-1]["incomeTaxExpense"]) / ebit[-1] if ebit[-1] != 0.0 else 0.0
+        tax_rate = abs(income[-1]["incomeTaxExpense"]) / ebit[-1] if ebit[-1] > 0.0 else 0.0
         rev: list = [data["revenue"] for data in income]
         d_a: list = [data["depreciationAndAmortization"] for data in income]
-        cap_ex: list = [data["capitalExpenditure"] for data in cashflow]
-        wc: list = [data["accountsReceivables"] + data["inventory"] - data["accountsPayables"] for data in cashflow]
-        for i in [ebit, [tax_rate], rev, d_a, cap_ex, wc]:
+        cap_ex: list = [abs(data["capitalExpenditure"]) for data in cashflow]
+        nwc: list = [data["netReceivables"] + data["inventory"] -
+                     data["accountPayables"] - data['deferredRevenue'] for data in balance]
+        for i in (rev, cap_ex): # мб как то можно решить проблему нулевого капекса
             if 0.0 in i:
                 return None
         """
@@ -512,21 +506,15 @@ class Company:
         Change in NWC
             Стремится к нулю, надо просто изучить предыдущую динамику и построить маршрут на 10 лет, считается 
             как % от изменения в revenue 
-
+               
         """
 
         last_rep_year = time.strptime(income[-1]["date"], '%Y-%m-%d').tm_year
-        if estimates and (time.strptime(estimates[0]["date"], '%Y-%m-%d').tm_year == last_rep_year):
+        est_year = time.strptime(estimates[0]["date"], '%Y-%m-%d').tm_year if estimates else last_rep_year + 1
+        while last_rep_year >= est_year:
             estimates = estimates[1:]
+            est_year = time.strptime(estimates[0]["date"], '%Y-%m-%d').tm_year
 
-        years = 21 if len(income) >= 10 else 2 * len(income) + 1
-
-        """
-        Что тут у нас осталось:
-            3. Ну и как то постабильнее стабильных ребят бы сделать
-            4. Тут есть проблема знаков, тип CapEx это траты, то есть минус, и мы их должны прибавить, но
-                по формуле мы их вычитаем, но там и значения у чела положительные, и так вот для всех трёх
-        """
         # Revenue
         rev_g = [get_growth(rev[i], item) for i, item in enumerate(rev[1:])]
         rev_est = []
@@ -538,9 +526,9 @@ class Company:
 
         rev_g_ma = 0.0
         rev_all_g = rev_g + rev_est_g
+        years = len(rev_all_g) + 1
         for i, value in enumerate(rev_all_g):
-            rev_g_ma = rev_g_ma * (1 - ((2 + i) / years)) + value * ((2 + i) / years)
-            # как правило, стабильно растёт и важность каждой последующей (в среднем значении) выше
+            rev_g_ma = rev_g_ma * (1 - ((1 + i) / years)) + value * ((1 + i) / years)
 
         # EBIT
         ebit_prc = [_ebit / _rev for _ebit, _rev in zip(ebit, rev)]
@@ -552,110 +540,100 @@ class Company:
             ebit_est_prc = [_ebit_est / _rev_est for _ebit_est, _rev_est in zip(ebit_est, rev_est)]
             ebit_est_prc_g = [get_growth(ebit_prc[-1], ebit_est_prc[0])] + \
                              [get_growth(ebit_est_prc[i], item) for i, item in enumerate(ebit_est_prc[1:])]
-        ebit_prc_g_ma = 0.0
-        ebit_prc_all_g = ebit_prc_g + ebit_est_prc_g
-        for i, value in enumerate(ebit_prc_all_g):
-            ebit_prc_g_ma = ebit_prc_g_ma * (1 - (2 / years)) + value * (2 / years)
 
         ebit_prc_ma = 0.0
         ebit_prc_all = ebit_prc + ebit_est_prc
-        years = 21
+        years = len(ebit_prc_all) + 1
         for i, value in enumerate(ebit_prc_all):
-            ebit_prc_ma = ebit_prc_ma * (1 - (2 / years)) + value * (2 / years)
+            ebit_prc_ma = ebit_prc_ma * (1 - ((1 + i) / years)) + value * ((1 + i) / years)
+
+        ebit_prc_g_ma = 0.0
+        ebit_prc_all_g = ebit_prc_g + ebit_est_prc_g
+        years = len(ebit_prc_all_g) + 1
+        for i, value in enumerate(ebit_prc_all_g):
+            ebit_prc_g_ma = ebit_prc_g_ma * (1 - ((1 + i) / years)) + value * ((1 + i) / years)
+
         last_ebit_prc = ebit_prc_ma + (abs(ebit_prc_ma) * ebit_prc_g_ma)
 
         # CapEx
-        # в принципе всё норм, надо только добавить какой-то стоп фактор, чтоб тренд капекса замедлялся, тип e темы
         cap_ex_prc = [_cap_ex / _rev for _cap_ex, _rev in zip(cap_ex, rev)]
-        cap_ex_prc_g = [get_growth(cap_ex_prc[i - 1], cap_ex_prc[i]) for i in range(1, len(cap_ex_prc))]
-        cap_ex_prc_g_ma = 0.0
-        for i, value in enumerate(cap_ex_prc_g):
-            cap_ex_prc_g_ma = cap_ex_prc_g_ma * (1 - (2 / years)) + value * (2 / years)
+
+        years = len(cap_ex_prc) + 1
         cap_ex_prc_ma = 0.0
-        years = 21
         for i, value in enumerate(cap_ex_prc):
             cap_ex_prc_ma = cap_ex_prc_ma * (1 - (2 / years)) + value * (2 / years)
-        last_cap_ex_prc = cap_ex_prc_ma + (abs(cap_ex_prc_ma) * cap_ex_prc_g_ma)
 
         # D&A
-        # тоже добавить какой-то стабилизации
         d_a_prc = [_d_a / _cap_ex for _d_a, _cap_ex in zip(d_a, cap_ex)]
-        d_a_prc_g = [get_growth(d_a_prc[i - 1], d_a_prc[i]) for i in range(1, len(d_a_prc))]
-        d_a_prc_g_ma = 0.0
-        for i, value in enumerate(d_a_prc_g):
-            d_a_prc_g_ma = d_a_prc_g_ma * (1 - (2 / years)) + value * (2 / years)
+
+        years = len(d_a_prc) + 1
         d_a_prc_ma = 0.0
         for i, value in enumerate(d_a_prc):
             d_a_prc_ma = d_a_prc_ma * (1 - (2 / years)) + value * (2 / years)
-        last_d_a_prc = d_a_prc_ma + (abs(d_a_prc_ma) * d_a_prc_g_ma)
 
-        # WC
-        wc_prc = [_wc / _rev for _wc, _rev in zip(wc, rev)]
-        wc_prc_g = [get_growth(wc_prc[i], item) for i, item in enumerate(wc_prc[1:])]
-        wc_prc_g_ma = 0.0
-        for i, value in enumerate(wc_prc_g):
-            wc_prc_g_ma = wc_prc_g_ma * (1 - (2 / years)) + value * (2 / years)
+        # NWC
+        nwc_prc = [item / rev[i] for i, item in enumerate(nwc)]
+        nwc_prc_g = [get_growth(nwc_prc[i], item) for i, item in enumerate(nwc_prc[1:])]
 
-        wc_prc_ma = 0.0
-        for i, value in enumerate(wc_prc):
-            wc_prc_ma = wc_prc_ma * (1 - (2 / years)) + value * (2 / years)
-        last_wc_prc = wc_prc_ma + (abs(wc_prc_ma) * wc_prc_g_ma)
+        years = len(nwc_prc) + 1
+        nwc_prc_ma = 0.0
+        for i, value in enumerate(nwc_prc):
+            nwc_prc_ma = nwc_prc_ma * (1 - ((1 + i) / years)) + value * ((1 + i) / years)
+
+        years = len(nwc_prc_g) + 1
+        nwc_prc_g_ma = 0.0
+        for i, value in enumerate(nwc_prc_g):
+            nwc_prc_g_ma = nwc_prc_g_ma * (1 - ((1 + i) / years)) + value * ((1 + i) / years)
+
+        last_nwc_prc = nwc_prc_ma + (abs(nwc_prc_ma) * nwc_prc_g_ma)
 
         # Calculate full data
-        rev_g = list((np.linspace(rev_g[-1], rev_g_ma, 11)).real)
         rev = [rev[-1]]
         for i in range(10):
             rev.append(round(rev[i] * (1 + rev_g_ma)))
         ebit.clear()
         for i, _ebit_prc in enumerate((np.linspace(ebit_prc[-1], last_ebit_prc, 11)).real):
             ebit.append(round(rev[i] * _ebit_prc))
-        cap_ex.clear()
-        for i, _cap_ex_prc in enumerate((np.linspace(cap_ex_prc[-1], last_cap_ex_prc, 11)).real):
-            cap_ex.append(round(rev[i] * _cap_ex_prc))
-        d_a.clear()
-        for i, _d_a_prc in enumerate((np.linspace(d_a_prc[-1], last_d_a_prc, 11)).real):
-            d_a.append(round(cap_ex[i] * _d_a_prc))
-        wc.clear()
-        for i, _c_nwc_prc in enumerate((np.linspace(wc_prc[-1], last_wc_prc, 11)).real):
-            wc.append(round(rev[i] * _c_nwc_prc))
+        cap_ex = [round(cap_ex_prc_ma * item) for item in rev[1:]]
+        d_a = [round(d_a_prc_ma * item) for item in cap_ex]
+        nwc.clear()
+        for i, _c_nwc_prc in enumerate((np.linspace(nwc_prc[-1], last_nwc_prc, 11)).real):
+            nwc.append(round(rev[i] * _c_nwc_prc))
+        c_nwc = [item - nwc[i] for i, item in enumerate(nwc[1:])]
 
         rev = rev[1:]
         ebit = ebit[1:]
-        cap_ex = cap_ex[1:]
-        d_a = d_a[1:]
-        wc = wc[1:]
         # WACC
         market_rate = 0.08
         for country in market_rate_all:
-            if country["country"] == Company.countries[self.data[DataType.PROFILE.value]["country"]]:
-                market_rate = country["totalEquityRiskPremium"] / 100
+            if country['country'] == Company.countries[profile['country']]:
+                market_rate = country['totalEquityRiskPremium'] / 100
                 break
-        beta = self.data[DataType.PROFILE.value]["beta"]
-        equity = balance[0]["totalEquity"]
-        cost_of_equity = risk_free + beta * (market_rate - risk_free)
-        debt = balance[0]["totalDebt"]
-        cost_of_debt = income[-1]["interestExpense"] / balance[-1]["totalDebt"] \
+        beta = profile["beta"]
+        equity = balance[-1]["totalEquity"]
+        cost_of_equity = risk_free + beta * market_rate
+        debt = balance[-1]["totalDebt"]
+        cost_of_debt = abs(income[-1]["interestExpense"]) / balance[-1]["totalDebt"] \
             if balance[-1]["totalDebt"] != 0.0 else 0.0
 
         wacc = (equity / (equity + debt)) * cost_of_equity + (debt / (equity + debt)) * cost_of_debt * (1 - tax_rate)
 
         # Terminal values and UFCF
-        terminal_growth_rate = 0.02
+        terminal_growth_rate = 0.025
 
-        u_fcf = [ebit[i] * (1 - tax_rate) + d_a[i] - cap_ex[i] - wc[i] for i in range(len(rev))]
+        u_fcf = [round(ebit[i] * (1 - tax_rate) + d_a[i] - cap_ex[i] - c_nwc[i]) for i in range(len(rev))]
 
-        terminl_value = (u_fcf[-1] * (1 + terminal_growth_rate)) / (wacc - terminal_growth_rate)
-        present_value_fcf = [item / ((1 + wacc) ** (i + 1)) for i, item in enumerate(u_fcf)]
-        present_value_tv = terminl_value / ((1 + wacc) ** 10)
-        ev = sum(present_value_fcf) + present_value_tv
-        cash = self.data[DataType.ENTERPRISE.value][0]["minusCashAndCashEquivalents"]
-        shares = self.data[DataType.ENTERPRISE.value][0]["numberOfShares"] \
-            if self.data[DataType.ENTERPRISE.value][0]["numberOfShares"] == 0 else \
-            self.data[DataType.ENTERPRISE.value][1]["numberOfShares"]  # изменить на diluted shares
+        terminl_value = round((u_fcf[-1] * (1 + terminal_growth_rate)) / (wacc - terminal_growth_rate))
+        present_value_fcf = [round(item / ((1 + wacc) ** (i + 1))) for i, item in enumerate(u_fcf)]
+        present_value_tv = round(terminl_value / ((1 + wacc) ** 10))
+        pv_ev = sum(present_value_fcf) + present_value_tv
+        cash = ev["minusCashAndCashEquivalents"]
+        shares = ev["numberOfShares"]
         if shares == 0:
             return None
-        price = (ev + cash - self.data[DataType.BALANCE.value][0]["totalDebt"]) / shares
-        return price
+        price = (pv_ev + cash - debt) / shares
+        # 115 -> 107 + 34 компании с негативным + none dcf
+        return price if price > 0.0 else 0.0
 
     @property
     def get_base_rate(self) -> float:
@@ -937,7 +915,6 @@ class Company:
 
     def estimate_company(self) -> None:
         self.data = network.download_data(self.ticker_str)
-        # self.data = network.upload_data()
 
         sector: str = self.data[DataType.PROFILE.value]['sector']  # Берём сектор
         self.industry_str = self.data[DataType.PROFILE.value]['industry']  # Берём индустрию
@@ -945,9 +922,9 @@ class Company:
 
         self.upgrade_ticker_json()
 
-        json.dump(self.ticker, open(self.ticker_path, 'wt'))
-        json.dump(self.industry, open(self.industry_path, 'wt'))
-        json.dump(self.sector, open(self.sector_path, 'wt'))
+        json.dump(self.ticker, open(self.ticker_path, 'wt', encoding='utf-8'))
+        json.dump(self.industry, open(self.industry_path, 'wt', encoding='utf-8'))
+        json.dump(self.sector, open(self.sector_path, 'wt', encoding='utf-8'))
 
         self.all_tickers[self.ticker_str] = {
             'version': self.version,
@@ -957,7 +934,21 @@ class Company:
         }
         if self.is_new_ticker:
             self.all_tickers['count'] = self.all_tickers['count'] + 1
-        json.dump(self.all_tickers, open(f'{Company.data_path}all_tickers.json', 'wt'))
+        json.dump(self.all_tickers, open(f'{Company.data_path}all_tickers.json', 'wt', encoding='utf-8'))
+
+    def upload_data(self) -> None:
+        sector = self.all_tickers[self.ticker_str]["sector"]
+        self.industry_str = self.all_tickers[self.ticker_str]["industry"]
+        self.prepare_data(sector)
+        self.ticker = self.old_ticker
+        self.industry = self.old_industry
+        if (None in self.ticker['relative_rate']['base']) | (None in self.ticker['relative_rate']['wide']):
+            self.ticker['relative_rate'] = self.get_relative_rate(self.ticker["base_rate"], self.ticker["indicators"])
+            json.dump(self.ticker, open(self.ticker_path, 'wt', encoding='utf-8'))
+        if self.version_control():
+            json.dump(self.ticker, open(self.ticker_path, 'wt', encoding='utf-8'))
+            self.all_tickers[self.ticker_str]['version'] = self.version
+            json.dump(self.all_tickers, open(f'{Company.data_path}all_tickers.json', 'wt', encoding='utf-8'))
 
     def is_time_to_update(self, sec_time: float) -> bool:
         last_update = time.gmtime(sec_time)
@@ -965,8 +956,16 @@ class Company:
         return True if last_report > last_update else False
 
     def get_company_data(self) -> (bool, bool):
-        self.all_tickers = json.load(open(f'{Company.data_path}all_tickers.json', 'rt'))
+        self.all_tickers = json.load(open(f'{Company.data_path}all_tickers.json', 'rt', encoding='utf-8'))
         if self.ticker_str in self.all_tickers:
             return False, self.is_time_to_update(self.all_tickers[self.ticker_str]['lastUpdate'])
         else:
             return True, True
+
+    def version_control(self) -> bool:
+        version = self.all_tickers[self.ticker_str]['version']
+        if self.version == version:
+            return False
+        elif version == 'v0.1':
+            self.ticker['dcf'] = self.compute_dcf
+            return True
