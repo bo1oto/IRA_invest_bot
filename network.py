@@ -1,11 +1,12 @@
+import certifi
 import datetime
+import json
+
 from typing import Union
 from urllib.request import urlopen
 
-import certifi
-import json
 
-api_key = '30f108d63e301c9f3ed49c75d138493b'
+api_key = 'api'
 
 sp_requests = [
     "income-statement",
@@ -20,11 +21,6 @@ requests = [
     "ratios-ttm",
     "key-metrics-ttm",
     "rating"
-    # Есть ещё календари разные: отчёты (всех/компании), дивы, сплиты, экономика
-    # Есть ещё пачка статистики: соц настроения, грейды, сюрпризы отчётов и ожидания аналитиков
-    # Также имеется инсайдерская часть
-    # Разумеется графики + индикаторы
-    # Доля институционалов в компании
 ]
 
 def download_data(ticker: str) -> list[Union[list, dict]]:
