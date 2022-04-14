@@ -1,12 +1,11 @@
+import json
+import matplotlib.pyplot as plt
+import time
+
 from enum import Enum
 from os import path, mkdir
-import json
-import time
-# seaborn надстройка matplotliba для более красивых графиков
+from matplotlib import dates, ticker as tckr
 from typing import Optional, Union
-
-import matplotlib.pyplot as plt
-from matplotlib import dates, ticker
 
 import network
 
@@ -47,6 +46,7 @@ class Company:
         self.industry = dict()
         self.industry_str = str()
         self.sector = dict()
+        self.sector_str = str()
         self.ticker_path = str()
         self.industry_path = str()
         self.sector_path = str()
@@ -54,7 +54,7 @@ class Company:
         self.is_yoy = True if _is_yoy == 0 else False
 
         self.is_new_ticker, is_time_to_update = self.get_company_data()
-        if is_time_to_update:
+        if is_time_to_update or bot_version > self.all_tickers[self.ticker_str]['version']:
             self.estimate_company()
         else:
             self.upload_data()
@@ -63,10 +63,8 @@ class Company:
 
         def build(base: str, add: list, sign: list) -> str:
             for _add, _sign in zip(add, sign):
-                base = base.replace(_sign, _add, 1)
+                base = base.replace(_sign, str(_add), 1)
             return base
-
-        report: str = f'{self.ticker["name"]}\n\n'
 
         def to_lnum(input_num: float):
             patterns = ['', 'k', 'm', 'b']
@@ -79,65 +77,28 @@ class Company:
         def to_prc(num):
             return ('+' if num > 0.0 else '') + f'{str(round(num * 100, 2))}%' if num is not None else 'n/a'
 
-        dynamics = lang_dict["dynamics"][config["report"]["dynamics"]]
+        report: str = f'{self.ticker["name"]}\n\n'
+        config_o = config['report']['other']
+        dynamics = lang_dict['dynamics'][config['report']['dynamics']]
 
-        key_s = self.ticker["key_statements"]
+        key_s = self.ticker['key_statements']
+
+        # Beta
+        if config_o[1]:
+            report += build(lang_dict['beta'], [str(self.ticker['beta'])], ['_'])
+            report += '\n'
 
         # Рейтинг
-        config_r: list = config["report"]["rate"]
-        if True in config_r:
-            if config_r[0]:
-                max_rate = str(10.0)
-                report += build(lang_dict["rate"]["data"][0],
-                                [str(self.ticker["base_rate"]), max_rate],
-                                ['_', '__']
-                                )
-            if config_r[1]: # base
-                base_str = lang_dict["rate"]["data"][1]
-                ind = self.ticker["relative_rate"]["base"]["industry"]
-                sec = self.ticker["relative_rate"]["base"]["sector"]
-
-                base_str = build(
-                    base_str,
-                    [build(lang_dict["rate"]["rel_yes"][0],
-                           [to_prc(ind), str(self.industry["tickers"]["count"])], ['_', '@'])
-                     ], ['_']) \
-                    if ind is not None else \
-                    build(base_str, [lang_dict["rate"]["no_data"][0]], ['_'])
-
-                base_str = build(
-                    base_str,
-                    [build(lang_dict["rate"]["rel_yes"][1],
-                           [to_prc(sec), str(self.sector["tickers"]["count"])], ['_', '@'])
-                     ], ['__']) \
-                    if sec is not None else \
-                    build(base_str, [lang_dict["rate"]["no_data"][1]], ['__'])
-                report += base_str
-            if config_r[2]: # wide
-                base_str = lang_dict["rate"]["data"][2]
-                ind = self.ticker["relative_rate"]["wide"]["industry"]
-                sec = self.ticker["relative_rate"]["wide"]["sector"]
-
-                base_str = build(
-                    base_str,
-                    [build(lang_dict["rate"]["rel_yes"][0],
-                           [to_prc(ind), str(self.industry["tickers"]["count"])], ['_', '@'])
-                     ], ['_']) \
-                    if ind is not None else \
-                    build(base_str, [lang_dict["rate"]["no_data"][0]], ['_'])
-
-                base_str = build(
-                    base_str,
-                    [build(lang_dict["rate"]["rel_yes"][1],
-                           [to_prc(sec), str(self.sector["tickers"]["count"])], ['_', '@'])
-                     ], ['__']) \
-                    if sec is not None else \
-                    build(base_str, [lang_dict["rate"]["no_data"][1]], ['__'])
-                report += base_str
+        if config_o[2]:
+            max_rate = str(10.0)
+            report += build(lang_dict['rate'],
+                            [str(self.ticker['base_rate']), max_rate],
+                            ['_', '__']
+                            )
             report += '\n'
 
         # Финансы
-        config_f: list = config["report"]["finance"]
+        config_f: list = config['report']['finance']
         if True in config_f:
             marks: list = [
                 'revenue',
@@ -156,16 +117,16 @@ class Company:
             report += '\n'
 
         # Баланс
-        config_b: list = config["report"]["balance"]
+        config_b: list = config['report']['balance']
         if True in config_b:
             marks: list = [
                 "totalDebt",
                 "cashAndCashEquivalents",
                 "netDebt"
             ]
-            report += lang_dict["balance"]["base_line"]
-            section_list = lang_dict["balance"]["data"]
-            key_dynamic = 'growth_yoy' if config["report"]["dynamics"] == 0 else 'growth_qoq'
+            report += lang_dict['balance']['base_line']
+            section_list = lang_dict['balance']['data']
+            key_dynamic = 'growth_yoy' if config['report']['dynamics'] == 0 else 'growth_qoq'
             for i in range(len(config_b)):
                 if config_b[i]:
                     report += build(section_list[i],
@@ -175,7 +136,6 @@ class Company:
                                     )
             report += '\n'
 
-        # В financial-growth есть рост дивидендов на акцию за 1, 3, 5 и 10 лет
         # Дивиденды
         config_d = config['report']['div']
         if True in config_d:
@@ -204,9 +164,43 @@ class Company:
                 report += lang_dict['div']['none']
             report += '\n'
 
+        config_v = config['report']['value']
+        # Оценка
+        if True in config_v:
+            local_dict: dict = lang_dict['value']
+            marks = [
+                'peRatioTTM',
+                'pegRatioTTM',
+                'priceToSalesRatioTTM',
+                'priceToBookRatioTTM',
+                'priceToFreeCashFlowsRatioTTM'
+            ]
+            report += local_dict['base_line']
+            templ_line: str = local_dict['template']
+            compare_type: int = config['report']['value_type']
+            for i, item in enumerate(config_v):
+                if item:
+                    add_arr = [local_dict['data'][i], self.ticker['indicators'][marks[i]]]
+                    filler_arr = ['_'] * 2
+                    if compare_type == 0:
+                        add_arr.extend([self.industry['indicators'][marks[i]]['avg'],
+                                        local_dict['value_type'][config['report']['value_type']],
+                                        self.industry['tickers']['count']])
+                        filler_arr.extend(['_'] * 3)
+                    elif compare_type == 1:
+                        add_arr.extend([self.sector['indicators'][marks[i]]['avg'],
+                                        local_dict['value_type'][config['report']['value_type']],
+                                        self.sector['tickers']['count']])
+                        filler_arr.extend(['_'] * 3)
+                    elif compare_type == 2:
+                        templ_line = templ_line[:5] + '\n'
+                    report += build(templ_line, add_arr, filler_arr)
+            report += '\n'
+
         # DCF
-        if config['report']['dcf'][0]:
-            add_line = f'{str(round(self.ticker["dcf"], 2))} $' if self.ticker["dcf"] is not None else lang_dict['dcf']['no_data']
+        if config_o[0]:
+            add_line = f'{str(round(self.ticker["dcf"], 2))} $' \
+                if self.ticker["dcf"] is not None else lang_dict['dcf']['no_data']
             report += build(lang_dict['dcf']['base_line'], [add_line], ['_'])
 
         return report
@@ -244,8 +238,8 @@ class Company:
         order = (str(round(max(data_list))).__len__() - 2)
         if order == 0:
             order = 1
-        ax.yaxis.set_major_locator(ticker.MultipleLocator(10 ** order))
-        ax.yaxis.set_minor_locator(ticker.MultipleLocator((10 ** order) / 2))
+        ax.yaxis.set_major_locator(tckr.MultipleLocator(10 ** order))
+        ax.yaxis.set_minor_locator(tckr.MultipleLocator((10 ** order) / 2))
 
         ax.plot(date_list, data_list)
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
@@ -265,15 +259,15 @@ class Company:
         fig.clf()
         return plot_path
 
-    def prepare_data(self, sector: str):
-        if not path.exists(f'{Company.data_path}{sector}'):
-            mkdir(f'{Company.data_path}{sector}')
-        if not path.exists(f'{Company.data_path}{sector}/{self.industry_str}'):
-            mkdir(f'{Company.data_path}{sector}/{self.industry_str}')
+    def prepare_data(self):
+        if not path.exists(f'{Company.data_path}{self.sector_str}'):
+            mkdir(f'{Company.data_path}{self.sector_str}')
+        if not path.exists(f'{Company.data_path}{self.sector_str}/{self.industry_str}'):
+            mkdir(f'{Company.data_path}{self.sector_str}/{self.industry_str}')
 
-        self.sector_path = f'{Company.data_path}{sector}/_{sector}.json'
-        self.industry_path = f'{Company.data_path}{sector}/{self.industry_str}/_{self.industry_str}.json'
-        self.ticker_path = f'{Company.data_path}{sector}/{self.industry_str}/{self.ticker_str}.json'
+        self.sector_path = f'{Company.data_path}{self.sector_str}/_{self.sector_str}.json'
+        self.industry_path = f'{Company.data_path}{self.sector_str}/{self.industry_str}/_{self.industry_str}.json'
+        self.ticker_path = f'{Company.data_path}{self.sector_str}/{self.industry_str}/{self.ticker_str}.json'
 
         if not self.is_new_ticker:
             self.old_ticker = json.load(open(self.ticker_path, 'rt', encoding='utf-8'))
@@ -289,17 +283,18 @@ class Company:
                 for iname in self.industry['indicators']:
                     if self.ticker['indicators'][iname] is not None:
                         self.industry['indicators'][iname] = {
-                            'avg': (self.industry['indicators'][iname]['avg'] + self.ticker['indicators'][iname]) / 2.0,
+                            'avg': round(
+                                (self.industry['indicators'][iname]['avg'] + self.ticker['indicators'][iname]) / 2, 2),
                             'acc': self.industry['indicators'][iname]['acc'] + self.ticker['indicators'][iname]
                         }
             else:
                 for iname in self.industry["indicators"]:
                     if self.ticker["indicators"][iname] is not None:
-                        self.industry["indicators"][iname]["acc"] = \
-                            self.industry["indicators"][iname]["acc"] + self.ticker["indicators"][iname] - \
-                            self.old_ticker["indicators"][iname]
-                        self.industry["indicators"][iname]["avg"] = \
-                            self.industry["indicators"][iname]["acc"] / self.industry["tickers"]["count"]
+                        dif: float = self.ticker["indicators"][iname] - self.old_ticker["indicators"][iname] \
+                            if self.old_ticker["indicators"][iname] is not None else self.ticker["indicators"][iname]
+                        self.industry["indicators"][iname]["acc"] = self.industry["indicators"][iname]["acc"] + dif
+                        self.industry["indicators"][iname]["avg"] = round(
+                            self.industry["indicators"][iname]["acc"] / self.industry["tickers"]["count"], 2)
         else:
             for iname in self.ticker["indicators"]:
                 if self.ticker["indicators"][iname] is not None:
@@ -315,16 +310,18 @@ class Company:
         if not is_new_sector:
             if self.old_industry:
                 for iname in self.sector["indicators"]:
-                    self.sector["indicators"][iname]["acc"] = \
-                        self.sector["indicators"][iname]["acc"] + self.industry["indicators"][iname]["avg"] - \
-                        self.old_industry["indicators"][iname]["avg"]
-                    self.sector["indicators"][iname]["avg"] = \
-                        self.industry["indicators"][iname]["acc"] / self.sector["industries"]["count"]
+                    dif: float = self.industry["indicators"][iname]["acc"] - \
+                                 self.old_industry["indicators"][iname]["acc"] \
+                        if self.old_industry["indicators"][iname]["acc"] is not None \
+                        else self.industry["indicators"][iname]["acc"]
+                    self.sector["indicators"][iname]["acc"] = self.sector["indicators"][iname]["acc"] + dif
+                    self.sector["indicators"][iname]["avg"] = round(
+                        self.industry["indicators"][iname]["acc"] / self.sector["industries"]["count"], 2)
             else:
                 for iname in self.sector["indicators"]:
                     self.sector["indicators"][iname] = {
                         "avg": (self.sector["indicators"][iname]["avg"] +
-                                self.industry["indicators"][iname]["acc"]) / 2.0,
+                                round(self.industry["indicators"][iname]["acc"]) / 2, 2),
                         "acc": self.sector["indicators"][iname]["acc"] + self.industry["indicators"][iname]["acc"]
                     }
         else:
@@ -340,7 +337,7 @@ class Company:
             self.sector["lastUpdate"] = self.ticker["lastUpdate"]
             if is_new_industry:
                 self.sector["base_rate"] = {
-                    "avg": (self.sector["base_rate"]["avg"] + self.industry["base_rate"]["avg"]) / 2.0,
+                    "avg": round((self.sector["base_rate"]["avg"] + self.industry["base_rate"]["avg"]) / 2, 2),
                     "acc": self.sector["base_rate"]["acc"] + self.industry["base_rate"]["avg"]
                 }
                 self.sector["industries"] = {
@@ -353,8 +350,8 @@ class Company:
                 }
             else:
                 self.sector["base_rate"]["acc"] = self.sector["base_rate"]["acc"] + \
-                                                  self.industry["base_rate"]["avg"] - self.old_industry["base_rate"][
-                                                      "avg"]
+                                                  self.industry["base_rate"]["avg"] - \
+                                                  self.old_industry["base_rate"]["avg"]
                 self.sector["base_rate"]["avg"] = round(self.sector["base_rate"]["acc"]
                                                         / self.sector["industries"]["count"], 2)
                 if self.is_new_ticker:
@@ -389,7 +386,7 @@ class Company:
             self.industry["lastUpdate"] = self.ticker["lastUpdate"]
             if self.is_new_ticker:
                 self.industry["base_rate"] = {
-                    "avg": (self.industry["base_rate"]["avg"] + self.ticker["base_rate"]) / 2.0,
+                    "avg": round((self.industry["base_rate"]["avg"] + self.ticker["base_rate"]) / 2.0, 2),
                     "acc": self.industry["base_rate"]["acc"] + self.ticker["base_rate"]
                 }
                 self.industry["tickers"] = {
@@ -399,8 +396,8 @@ class Company:
             else:
                 self.industry["base_rate"]["acc"] = self.industry["base_rate"]["acc"] + \
                                                     self.ticker["base_rate"] - self.old_ticker["base_rate"]
-                self.industry["base_rate"]["avg"] = self.industry["base_rate"]["acc"] / self.industry["tickers"][
-                    "count"]
+                self.industry["base_rate"]["avg"] = round(
+                    self.industry["base_rate"]["acc"] / self.industry["tickers"]["count"], 2)
         else:
             is_new_industry = True
             self.industry = {
@@ -419,11 +416,11 @@ class Company:
         self.upgrade_sector_json(is_new_industry)
 
     def upgrade_ticker_json(self) -> None:
-        base_rate = round(self.get_base_rate, 2)
         self.ticker = {
-            'name': self.data[DataType.PROFILE.value]["companyName"],
+            'name': self.data[DataType.PROFILE.value]['companyName'],
             'ticker': self.ticker_str,
-            'base_rate': base_rate,
+            'beta': self.data[DataType.PROFILE.value]['beta'],
+            'base_rate': round(self.get_base_rate, 2),
             'relative_rate': {},
             'dcf': self.compute_dcf,
             'lastUpdate': round(time.time()),
@@ -431,35 +428,43 @@ class Company:
             'indicators': self.get_indicators
         }
         self.upgrade_industry_json()
-        self.ticker["relative_rate"] = self.get_relative_rate(self.ticker["base_rate"], self.ticker["indicators"])
+        self.ticker['relative_rate'] = self.get_relative_rate(self.ticker['base_rate'], self.ticker['indicators'])
+
+    def remove_ticker(self):
+        sector_str = self.all_tickers[self.ticker_str]['sector']
+        industry_str = self.all_tickers[self.ticker_str]['industry']
+        sector_path = f'{Company.data_path}{sector_str}/_{sector_str}.json'
+        industry_path = f'{Company.data_path}{sector_str}/{industry_str}/_{industry_str}.json'
+        ticker_path = f'{Company.data_path}{sector_str}/{industry_str}/{self.ticker_str}.json'
+
+        ticker = json.load(open(ticker_path, 'rt', encoding='utf-8'))
+        sector = json.load(open(sector_path, 'rt', encoding='utf-8'))
+        industry = json.load(open(industry_path, 'rt', encoding='utf-8'))
+        industry['tickers']['count'] -= 1
+        industry['tickers']['data'].remove(self.ticker_str)
+        industry['base_rate']['acc'] -= ticker['base_rate']
+        industry['base_rate']['avg'] = round(industry['base_rate']['acc'] / industry['tickers']['count'], 2)
+        for element in industry['indicators']:
+            industry['indicators'][element]['acc'] -= ticker['indicators'][element]
+            industry['indicators'][element]['avg'] = round(industry['indicators'][element]['acc'] /
+                                                           industry['tickers']['count'], 4)
+
+        sector['tickers']['count'] -= 1
+        sector['tickers']['data'].remove(self.ticker_str)
+        sector['base_rate']['acc'] -= industry['base_rate']['avg']
+        sector['base_rate']['avg'] = round(sector['base_rate']['acc'] / sector['tickers']['count'], 2)
+        for element in industry['indicators']:
+            sector['indicators'][element]['acc'] -= industry['indicators'][element]['avg']
+            sector['indicators'][element]['avg'] = round(sector['indicators'][element]['acc'] /
+                                                         sector['tickers']['count'], 4)
+        os.remove(ticker_path)
+        self.is_new_ticker = True
+        json.dump(sector, open(sector_path, 'wt', encoding='utf-8'))
+        json.dump(industry, open(industry_path, 'wt', encoding='utf-8'))
 
     @property
     def compute_dcf(self) -> Optional[float]:
         import numpy as np
-        """
-            Нам нужно количество лет вперёд и рассчитать для них рост:
-                1) Revenue
-                2) EBIT
-                3) Taxes
-                4) D&A
-                5) CapEx
-                6) Change in NWC
-
-            Terminal growth rate - нечто между долгосрочным прогнозом по инфляции и ростом ввп страны
-                пока оставлю константой, 2% наверное, потом постараюсь её считать
-
-            1. Unlevered FCF = EBIT * (1 - tax rate) + D&A - CapEx - Change in NWC
-            2. WACC = %of equity * cost of equity + %of debt * cost of debt * (1 - tax rate)
-                2.1 COE = Risk-free rate of return (10y Y) + beta * (market rate of return - Risk-free rate of return)
-                2.2 COD = interest rate (неккоректно его считаем, поскольку берём только за последний год,
-                                            но как по другому хз, разве что тоже брать среднее)
-            3. Terminal value = (last year UFCF * (1 + TGR)) / (WACC - TGR)
-            4. Present value of FCF = UFCF / (1 + WACC)^passed years
-            5. Present value of TV = TV / (1 + WACC)^passed years
-            6. EV = sum(PV of FCF) + PV of TV
-            7. Price = (EV + Cash - Debt) / outstanding share
-        """
-        # надо учесть, что может не быть ожиданий
         risk_free, market_rate_all, estimates, income, cashflow, balance, ev = network.get_dcf_data(self.ticker_str)
         if ev:
             ev = ev[0]
@@ -482,32 +487,9 @@ class Company:
         cap_ex: list = [abs(data["capitalExpenditure"]) for data in cashflow]
         nwc: list = [data["netReceivables"] + data["inventory"] -
                      data["accountPayables"] - data['deferredRevenue'] for data in balance]
-        for i in (rev, cap_ex): # мб как то можно решить проблему нулевого капекса
+        for i in (rev, cap_ex):
             if 0.0 in i:
                 return None
-        """
-        Revenue
-            Берём средний рост выручки за 10 лет и ожидания аналитиков по росту в следующие 2-3 года (макс)
-            Берём среднюю выручку за 10 лет и её ожидания
-            Берём среднее от каждого и увеличиваем выручку на величину роста
-            Получаем условную выручку, предполагаемую через 10 лет
-            Можно взять из этих ожиданий средний размах, но вообще это используется в сценариях мне кажется
-            Ну допустим, и дальше мы от крайней ожидаемой выручки строим равномерный путь к нашей посчитанной выручке
-        EBIT
-            ebit считаем на основе её доли от revenue, смотрим среднюю операционную маржу и темпы её роста, 
-            закладываем некий "постоянный рост" и считаем на 10 год и рассчитываем равномерный путь
-        D&A
-            В d&a смотрим также среднее значение, рост и амплитуду колебаний (наверное для сценариев),
-            считаем как % от CapEx
-        CapEx
-            CapEx в теории снижается до какого-то стабильного уровня, считается как процент от выручки
-            Нам бы как-то взять среднее, в котором единоразовые 1000% не будут иметь значение
-            Считаем количество значений в рамках одного процента и через вес этих процентов ищем среднее
-        Change in NWC
-            Стремится к нулю, надо просто изучить предыдущую динамику и построить маршрут на 10 лет, считается 
-            как % от изменения в revenue 
-               
-        """
 
         last_rep_year = time.strptime(income[-1]["date"], '%Y-%m-%d').tm_year
         est_year = time.strptime(estimates[0]["date"], '%Y-%m-%d').tm_year if estimates else last_rep_year + 1
@@ -632,8 +614,7 @@ class Company:
         if shares == 0:
             return None
         price = (pv_ev + cash - debt) / shares
-        # 115 -> 107 + 34 компании с негативным + none dcf
-        return price if price > 0.0 else 0.0
+        return round(price, 2)
 
     @property
     def get_base_rate(self) -> float:
@@ -666,8 +647,6 @@ class Company:
             debt_score += 0.25
 
         # Div block
-        # Надо добавить, что если дивы < чем доходность трежерей - это плохо,
-        # или вообщес сделать градацию по доходностям
         treasury = network.get_last_treasury()
         if ratios["dividendYield"] is not None:
             if ratios["dividendYield"] > treasury['year10']:
@@ -679,9 +658,6 @@ class Company:
         else:
             div_score = 0.0
 
-        # Value block
-        # разницу между p/e и forward p/e, но его надо строить самому из ожиданий аналитиков, а это пока низя
-
         # Growth block
         key_metrics = [
             "revenueGrowth",
@@ -690,8 +666,6 @@ class Company:
             "dividendsperShareGrowth",
             "bookValueperShareGrowth"
         ]
-        # Возможно поменять банальное "среднее за 2", хотя хз
-        # Этот блок наверное стоит переработать, чтоб Financial_G не скачивать, ибо он дублёр по сути
         growth_score = 1.25
         for metric in key_metrics:
             avg_growth = sum([_fin_g[metric] for _fin_g in fin_g]) / 4
@@ -699,7 +673,6 @@ class Company:
                 growth_score = 2.5
             elif avg_growth <= -0.05:
                 growth_score = 0.0
-        # Можно возвращать массив из 4 параметров
         return profit_score + debt_score + div_score + growth_score
 
     @property
@@ -765,20 +738,20 @@ class Company:
 
         final_dict = {}
         for elem in ratio_str:
-            final_dict[elem] = 0.0 if ratios[elem] is None else ratios[elem]
+            final_dict[elem] = 0.0 if ratios[elem] is None else round(ratios[elem], 2)
         for elem in key_metric_str:
-            final_dict[elem] = key_metric[elem]
+            final_dict[elem] = 0.0 if key_metric[elem] is None else round(key_metric[elem], 2)
 
         return final_dict
 
     @property
     def get_key_statements(self) -> dict:
         def get_yoy_growth(data: list, name: str) -> Optional[float]:
-            return get_growth(data[4][name], data[0][name]) \
+            return round(get_growth(data[4][name], data[0][name]), 4) \
                 if (len(data) >= 5) and (None not in [data[4][name], data[0][name]]) else None
 
         def get_qoq_growth(data: list, name: str) -> Optional[float]:
-            return get_growth(data[1][name], data[0][name]) \
+            return round(get_growth(data[1][name], data[0][name]), 4) \
                 if (len(data) >= 2) and (None not in [data[1][name], data[0][name]]) else None
 
         income = self.data[DataType.INCOME.value]
@@ -839,24 +812,6 @@ class Company:
         return key_statements
 
     def get_relative_rate(self, base_rate: float, ratios: dict) -> dict:
-        def get_rates(rel_indic: dict) -> float:
-            rate = 0.0
-            for element in up_ratio:
-                rate += get_growth(rel_indic[element]['avg'], ratios[element])
-            for element in low_ratio:
-                rate += get_growth(rel_indic[element]['avg'], ratios[element])
-            return rate / (len(up_ratio) + len(low_ratio))
-
-        rates: dict[str, dict[str, Optional[float]]] = {
-            'base': {
-                'industry': None,
-                'sector': None
-            },
-            'wide': {
-                'industry': None,
-                'sector': None
-            }
-        }
         up_ratio = {
             'freeCashFlowPerShareTTM',
             'cashPerShareTTM',
@@ -902,24 +857,46 @@ class Company:
             'enterpriseValueMultipleTTM'
         }
 
+        def get_rates(rel_indic: dict) -> float:
+            rate: float = 0.0
+            for element in up_ratio:
+                rate += get_growth(rel_indic[element]['avg'], ratios[element])
+            for element in low_ratio:
+                rate += get_growth(rel_indic[element]['avg'], ratios[element])
+            return round(rate / (len(up_ratio) + len(low_ratio)), 4)
+
+        rates: dict[str, dict[str, Optional[float]]] = {
+            'base': {
+                'industry': None,
+                'sector': None
+            },
+            'wide': {
+                'industry': None,
+                'sector': None
+            }
+        }
+
         if self.industry['tickers']['count'] >= 5:
             ind_indic = self.industry['indicators']
             rates['wide']['industry'] = get_rates(ind_indic)
-            rates['base']['industry'] = get_growth(base_rate, self.industry['base_rate']['avg'])
+            rates['base']['industry'] = round(get_growth(base_rate, self.industry['base_rate']['avg']), 4)
         if self.sector["tickers"]["count"] >= 10:
             sec_indic = self.sector["indicators"]
             rates['wide']['sector'] = get_rates(sec_indic)
-            rates['base']['sector'] = get_growth(base_rate, self.sector['base_rate']['avg'])
+            rates['base']['sector'] = round(get_growth(base_rate, self.sector['base_rate']['avg']), 4)
 
         return rates
 
     def estimate_company(self) -> None:
         self.data = network.download_data(self.ticker_str)
 
-        sector: str = self.data[DataType.PROFILE.value]['sector']  # Берём сектор
-        self.industry_str = self.data[DataType.PROFILE.value]['industry']  # Берём индустрию
-        self.prepare_data(sector)
+        self.sector_str = self.data[DataType.PROFILE.value]['sector']
+        self.industry_str = self.data[DataType.PROFILE.value]['industry']
+        if (self.sector_str != self.all_tickers[self.ticker_str]['sector'] or
+            self.industry_str != self.all_tickers[self.ticker_str]['industry']) and not self.is_new_ticker:
+            self.remove_ticker()
 
+        self.prepare_data()
         self.upgrade_ticker_json()
 
         json.dump(self.ticker, open(self.ticker_path, 'wt', encoding='utf-8'))
@@ -928,7 +905,7 @@ class Company:
 
         self.all_tickers[self.ticker_str] = {
             'version': self.version,
-            'sector': sector,
+            'sector': self.sector_str,
             'industry': self.industry_str,
             'lastUpdate': self.ticker['lastUpdate']
         }
@@ -937,18 +914,14 @@ class Company:
         json.dump(self.all_tickers, open(f'{Company.data_path}all_tickers.json', 'wt', encoding='utf-8'))
 
     def upload_data(self) -> None:
-        sector = self.all_tickers[self.ticker_str]["sector"]
-        self.industry_str = self.all_tickers[self.ticker_str]["industry"]
-        self.prepare_data(sector)
+        self.sector_str = self.all_tickers[self.ticker_str]['sector']
+        self.industry_str = self.all_tickers[self.ticker_str]['industry']
+        self.prepare_data()
         self.ticker = self.old_ticker
         self.industry = self.old_industry
         if (None in self.ticker['relative_rate']['base']) | (None in self.ticker['relative_rate']['wide']):
             self.ticker['relative_rate'] = self.get_relative_rate(self.ticker["base_rate"], self.ticker["indicators"])
             json.dump(self.ticker, open(self.ticker_path, 'wt', encoding='utf-8'))
-        if self.version_control():
-            json.dump(self.ticker, open(self.ticker_path, 'wt', encoding='utf-8'))
-            self.all_tickers[self.ticker_str]['version'] = self.version
-            json.dump(self.all_tickers, open(f'{Company.data_path}all_tickers.json', 'wt', encoding='utf-8'))
 
     def is_time_to_update(self, sec_time: float) -> bool:
         last_update = time.gmtime(sec_time)
@@ -961,11 +934,3 @@ class Company:
             return False, self.is_time_to_update(self.all_tickers[self.ticker_str]['lastUpdate'])
         else:
             return True, True
-
-    def version_control(self) -> bool:
-        version = self.all_tickers[self.ticker_str]['version']
-        if self.version == version:
-            return False
-        elif version == 'v0.1':
-            self.ticker['dcf'] = self.compute_dcf
-            return True
