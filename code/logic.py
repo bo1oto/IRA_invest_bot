@@ -12,6 +12,8 @@ import analyzer
 import network
 
 
+# Для каждого языка своя группа биндов (в будущем свой диспатчер наверное, хз()
+# 0 группа - группа с командами и callback
 class HandlerGroup(Enum):
     MAIN_MENU = 0
     CONFIG = 1
@@ -21,10 +23,10 @@ class HandlerGroup(Enum):
 
 bot_version = 'v0.3'
 
-orig_bot_token: str = ''
-test_bot_token: str = ''
+orig_bot_token: str = ORIG_TOKEN
+test_bot_token: str = TEST_TOKEN
 
-admin_id: int = 0
+admin_id: int = ID
 bot: Bot = Bot(token=orig_bot_token)
 updater: Updater = Updater(bot=bot)
 dispatcher: Dispatcher = updater.dispatcher
@@ -109,6 +111,7 @@ def update_config(user_id: int, lang: str = '', work_mode: int = -1, chart=(-1, 
             num = num + 1 if num + 1 != 3 else 0
             config['report']['value_type'] = num
     else:
+        # Задаём дефолтные настройки, уже три :)
         config = config_template
 
     json.dump(config, open(file_path, "wt"))
@@ -119,6 +122,8 @@ def get_lang_code(user_id: int) -> str:
         config = json.load(open(file_path, "rt"))
         return config["language"]
     else:
+        # Если по какой-то причине конфиг пропал, создаём новый
+        # + надо наверное уведомить и попросить заново настроить бота
         return "en"
 
 def get_work_mode(user_id: int) -> int:
@@ -127,6 +132,8 @@ def get_work_mode(user_id: int) -> int:
         config = json.load( open(file_path, "rt"))
         return config["work_mode"]
     else:
+        # Если по какой-то причине конфиг пропал, создаём новый
+        # + надо наверное уведомить и попросить заново настроить бота
         return 0
 
 def get_config(user_id: int) -> dict:
@@ -135,6 +142,8 @@ def get_config(user_id: int) -> dict:
         config = json.load(open(file_path, "rt"))
         return config
     else:
+        # Если по какой-то причине конфиг пропал, создаём новый
+        # + надо наверное уведомить и попросить заново настроить бота
         return config_template
 
 
@@ -162,6 +171,7 @@ def clear(update: Update, context: CallbackContext) -> None:
 
 # Work modes
 def select_work_mode(update: Update, context: CallbackContext) -> None:
+    # По идее, у каждой надо содержать строку, описывающую режим после нажатия кнопки
     keyboard = []
     _id = update.effective_user.id
     lang_code = get_lang_code(_id)
@@ -367,6 +377,7 @@ def analyze_ticker(chat, user_id: int, ticker: str) -> None:
     config = get_config(user_id)
     company = analyzer.Company(ticker, bot_version, config['report']['dynamics'])
     report = company.generate_report(get_config(user_id), lang_dict[get_lang_code(user_id)]['report'])
+    # Отчёт может быть и без графика, или же с массивом графиков
     if config['chart']['data'][0]:
         plot_path = company.generate_chart()
         chat.send_photo(open(plot_path, 'rb'), caption=report)
@@ -416,4 +427,4 @@ def start_telegram_bot() -> None:
                           url_path=orig_bot_token,
                           key='\\tg-key.key',
                           cert='\\tg-cert.pem',
-                          webhook_url=f'IP:port/{orig_bot_token}')
+                          webhook_url=f'13.51.244.137:443/{orig_bot_token}')
